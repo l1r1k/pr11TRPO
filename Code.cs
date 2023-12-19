@@ -11,34 +11,63 @@ using OnlineShop.Models;
 namespace OnlineShop.Controllers
 {
     /// <summary>
+    /// Класс отвечающий за использование запросов на API
+    /// </summary>
+    /// <typeparam name="T">Класс модели, которую необходимо получить</typeparam>
+    public class Requests<T>
+        {
+            /// <summary>
+            /// Функция отправки GET-запроса для получения записей из API
+            /// </summary>
+            /// <param name="pathEndpointApi">Путь эндпоинта API</param>
+            /// <param name="responseListFromAPI">Список, получения записей которой модели подразумевается</param>
+            /// <returns>Список записей или в случае критической ошибки</returns>
+            public async Task<List<T>> GetRequestToAPI(string pathEndpointApi, List<T> responseListFromAPI)
+            {
+                try
+                {
+                    using (var httpClient = new HttpClient())
+                    {
+                        using (var response = await httpClient.GetAsync("https://localhost:7002/api/" + pathEndpointApi))
+                        {
+                            string apiResponse = await response.Content.ReadAsStringAsync();
+                            responseListFromAPI = JsonConvert.DeserializeObject<List<T>>(apiResponse);
+                        }
+                    }
+                    return responseListFromAPI;
+                }
+                ///Если ошибка при запросе, то возвращается список строк, с элементом ошибки.
+                catch (Exception ex)
+                {
+                    return new List<T>() { "Ошибка при попытке отправить запрос. Сообщение ошибки: " + ex.Message };
+                }
+            }
+        }
+
+    /// <summary>
     /// Класс отвечающий за функционал покупателя
     /// </summary>
     public class BuyerController : Controller
     {
         /// <summary>
-        /// Функция выполняет GET-запрос на API для получения списков по переданному пути
+        /// Функция отправки POST-запроса для добавления лога или критической ошибки в текстовый файл, находящийся на сервере
         /// </summary>
-        /// <param name="pathEndpointApi">Путь эндпоинта на API</param>
-        /// <param name="responseListFromAPI">Список, получающий запрос с API</param>
-        /// <returns>Список заполненный данными с API</returns>
-        public async Task<T> GetRequestToAPI(string pathEndpointApi, List<T> responseListFromAPI)
+        /// <param name="path">Путь до эндпоинта в API</param>
+        /// <param name="message">Сообщение лога или критической ошибки</param>
+        /// <returns>Строковое значение, после выполнения POST-запроса</returns>
+        private async Task<string> PostLogs(string path, string message)
         {
-            try
+            LogInfoModel logInfoModel = new LogInfoModel();
+            logInfoModel.TypeLog = path == "fatal" ? "fatalErrors" : "logs";
+            logInfoModel.InfoLog = message;
+            using (var httpClient = new HttpClient())
             {
-                using (var httpClient = new HttpClient())
+                StringContent content = new StringContent(JsonConvert.SerializeObject(logInfoModel), Encoding.UTF8, "application/json");
+
+                using (var response = await httpClient.PostAsync($"https://localhost:7002/{path}", content))
                 {
-                    using (var response = await httpClient.GetAsync("https://localhost:7002/api/" + pathEndpointApi))
-                    {
-                        string apiResponse = await response.Content.ReadAsStringAsync();
-                        responseListFromAPI = JsonConvert.DeserializeObject<List<T>>(apiResponse);
-                    }
+                    return "Success";
                 }
-                return responseListFromAPI;
-            }
-            ///Если ошибка при запросе, то возвращается список строк, с элементом ошибки.
-            catch (Exception ex)
-            {
-                return new List<string>(){"Ошибка при попытке отправить запрос. Сообщение ошибки: " + ex.Message}
             }
         }
 
@@ -84,6 +113,9 @@ namespace OnlineShop.Controllers
             ///Если при выполнении запроса обнаружилась критическая ошибка, то отображается пустое представление
             catch (Exception ex)
             {
+                //Отправка сообщения критической ошибки на логирование
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке получения " + 
+                $"товаров с API на странице Каталог товаров. {ex.Message}");
                 return View(new AvailableModel());
             }
         }
@@ -117,6 +149,7 @@ namespace OnlineShop.Controllers
             ///Если при попытке получения корзины из сессии куки обнаружена ошибка, то происходит возврат на страницу "Каталог товаров"
             catch (Exception ex)
             {
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке открытия страницы корзины. {ex.Message}");
                 return RedirectToAction("HomePageBuyer", "Buyer")
             }
         }
@@ -146,6 +179,8 @@ namespace OnlineShop.Controllers
             ///Если при попытке добавления мебели в корзину происходит критическая ошибка, то происходит возврат на страницу "Каталог товаров"
             catch (Exception ex)
             {
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке добавления товара с " + 
+                $"артикулом {article} в корзину. {ex.Message}");
                 return RedirectToAction("HomePageBuyer", "Buyer");
             }
         }
@@ -174,6 +209,8 @@ namespace OnlineShop.Controllers
             ///Если при попытке удаления позиции из корзины происходит критическая ошибка, то происходит обновление страницы "Корзина"
             catch (Exception ex)
             {
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке удаления товара с " +
+                $"индексом {number} из корзины. {ex.Message}");
                 return RedirectToAction("Cart", "Buyer");
             }
         }
@@ -251,6 +288,7 @@ namespace OnlineShop.Controllers
             ///Если при попытке оформления заказа произошла критическая ошибка, то обновляется страница "Корзина"
             catch (Exception ex)
             {
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке оформления заказа. {ex.Message}");
                 return RedirectToAction("Cart", "Buyer");
             }
         }
@@ -319,6 +357,8 @@ namespace OnlineShop.Controllers
             ///Если при выполнении функции произошла критическая ошибка, то происходит переадресация на страницу "Каталог товаров"
             catch (Exception ex)
             {
+                await PostLogs("fatal", $"{DateTime.Now} - {HttpContext.Session.GetString("AuthUser")}. Критическая ошибка при попытке получения" +
+                $"данных о заказах авторизованного покупателя. {ex.Message}");
                 return RedirectToAction("HomePageBuyer", "Buyer")
             }
         }
